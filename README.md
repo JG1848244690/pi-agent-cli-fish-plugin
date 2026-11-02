@@ -136,7 +136,7 @@ pi
 - **常驻就是一行**：无标题、无边框，正文最长 66 列，行尾只有一个百分比；
 - **不注册 LLM 工具**：正文永远不进模型上下文，不花 token；
 - **不写 Pi 会话**：书库和进度存在 `~/.pi/agent/fish/state.json`，会话记录里没有书名和路径；
-- **多开不打架**：多个 Pi 同时读不同的书时，保存会按书合并进度（`updatedAt` 新的胜出）、书库取并集，再用跨实例锁和临时文件原子替换；同一本书以最后保存为准。
+- **多开不打架，并且实时同步**：多个 Pi / OpenCode 同时读不同的书时，保存会按书合并进度（`updatedAt` 新的胜出）、书库取并集，再用跨实例锁和临时文件原子替换；同一台机器上还会监听 `state.json`，别的会话翻页后当前行约 50ms 内跟着走。同一本书两边都在翻时以最后保存为准。
 - **老板键是真空的**：`b` 直接销毁常驻行和阅读器；
 - 命令描述都是中性的（"Add a local text file or folder"）。
 
@@ -187,6 +187,6 @@ rm -r ~/.pi/agent/fish
 
 ## OpenCode 版（实验）
 
-同一套阅读引擎的 OpenCode TUI 移植在 `packages/opencode-fish`（分支 `feat/opencode-fish`）。目前只有常驻一行 + 键盘翻页 + `/fish-save`，没有鼠标和多行阅读模式；进度和 Pi 版共用 `~/.pi/agent/fish/state.json`。详见该目录的 README。
+同一套阅读引擎的 OpenCode TUI 移植在 `packages/opencode-fish`（分支 `feat/opencode-fish`）。目前只有常驻一行 + 键盘翻页 + `/fish-save`，没有鼠标和多行阅读模式；进度和 Pi 版共用 `~/.pi/agent/fish/state.json`，并且实时互相跟随（监听文件，约 50ms）。详见该目录的 README。
 
 Pi 版仍然在仓库根目录，安装路径不变；等 OpenCode 版跑通后再把 Pi 包迁进 `packages/` 做完整 monorepo。

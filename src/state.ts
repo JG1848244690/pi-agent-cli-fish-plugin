@@ -13,7 +13,9 @@ import {
   renameSync,
   statSync,
   unlinkSync,
+  watch,
   writeFileSync,
+  type FSWatcher,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -100,11 +102,11 @@ const CONFIG_KEYS = ["readerLines", "placement", "resumeOnStart", "manualSeeded"
 /** What this process last read (or wrote) for a config, per agent dir. */
 const configBaseline = new Map<string, FishConfig>();
 
-function readState(agentDir: string): FishState {
+function parseState(agentDir: string): FishState | null {
   migrateLegacyDir(agentDir);
   const file = statePath(agentDir);
   try {
-    if (!existsSync(file)) return defaultState();
+    if (!existsSync(file)) return null;
     const raw = JSON.parse(readFileSync(file, "utf8")) as Partial<FishState> & {
       config?: Partial<FishConfig> & { pageLines?: number };
     };
@@ -151,8 +153,22 @@ function readState(agentDir: string): FishState {
       },
     };
   } catch {
-    return defaultState();
+    return null;
   }
+}
+
+function readState(agentDir: string): FishState {
+  return parseState(agentDir) ?? defaultState();
+}
+
+/**
+ * Read the file for a merge without touching the config-merge baseline. Used
+ * by plugins that refresh progress from disk while running; changing the
+ * baseline there would make their older in-memory config look like a local edit
+ * and overwrite another instance's config change on the next save.
+ */
+export function readDiskState(agentDir: string): FishState {
+  return parseState(agentDir) ?? defaultState();
 }
 
 // ------------------------------------------------------------ multi-instance --
@@ -253,4 +269,39 @@ export function saveState(agentDir: string, state: FishState): void {
   } catch {
     // Reading novels is not worth crashing an agent session over.
   }
+}
+
+/**
+ * Watch the shared state file and call `onChange` when another process writes
+ * it. Both plugins use this so a page turn in Pi shows up in OpenCode (and the
+ * other way round) without reopening the book.
+ *
+ * The watcher follows the directory rather than the file: saves replace
+ * `state.json` via rename, which would detach a file watcher on Windows.
+ */
+export function watchState(agentDir: string, onChange: (state: FishState) => void): () => void {
+  const dir = dirname(statePath(agentDir));
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let watcher: FSWatcher | null = null;
+  try {
+    mkdirSync(dir, { recursive: true });
+    watcher = watch(dir, { persistent: false }, (_event, filename) => {
+      if (filename && String(filename) !== "state.json") return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        // Atomic rename means a half-written file should never be visible; if
+        // the parse still fails, keep the last good state and try the next event.
+        const state = parseState(agentDir);
+        if (state) onChange(state);
+      }, 50);
+      (timer as { unref?: () => void }).unref?.();
+    });
+  } catch {
+    return () => {};
+  }
+  return () => {
+    if (timer) clearTimeout(timer);
+    watcher?.close();
+  };
 }

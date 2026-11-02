@@ -19,7 +19,7 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 
 import { advanceFrom, anchorFor, atBookEnd, backFrom, charsAt, posFromChars } from "../../../src/paging.ts";
 import { chapterAt, loadBook, pageAt, percentAt, type Book, type Pos } from "../../../src/reader.ts";
-import { loadState, saveState, type FishState } from "../../../src/state.ts";
+import { loadState, saveState, watchState, type FishState } from "../../../src/state.ts";
 
 /** The single-line widget wraps at 66 columns, like the Pi version. */
 const BODY_WIDTH = 66;
@@ -52,6 +52,8 @@ export default Plugin.define({
     // Loaded book content. Progress itself lives in `view` / Pi's state file.
     let book: Book | null = null;
     let unregisterSlot: (() => void) | null = null;
+    /** Timestamp of the last entry this process wrote, to ignore our own watcher event. */
+    let lastSavedAt = 0;
 
     const toast = (message: string, variant: "info" | "success" | "warning" | "error" = "info") =>
       context.ui.toast.show({ message, variant });
@@ -72,16 +74,18 @@ export default Plugin.define({
       if (!pos) return;
       const chars = charsAt(book, pos, anchorFor(book, pos, BODY_WIDTH), BODY_WIDTH);
       const chapter = chapterAt(book, pos);
+      const updatedAt = Date.now();
       piState.last = book.path;
       piState.books[book.path] = {
         para: pos.para,
         chars,
         percent: percentOf(pos),
         ...(chapter ? { chapter: chapter.number } : {}),
-        updatedAt: Date.now(),
+        updatedAt,
       };
       if (!piState.library.includes(book.path)) piState.library.push(book.path);
       saveState(agentDir, piState);
+      lastSavedAt = updatedAt;
     };
 
     const setPos = (pos: Pos): void => {
@@ -210,6 +214,27 @@ export default Plugin.define({
       open(piState.last);
     }
 
+    // Live sync with Pi (and other OpenCode windows) through the shared file.
+    // Adopting a position never writes back, so the two processes do not echo.
+    const stopWatching = watchState(agentDir, (disk) => {
+      piState = disk;
+      const current = book;
+      if (!current) return;
+      const entry = disk.books[current.path];
+      if (!entry) return;
+      if (entry.para === view.para && (entry.chars ?? 0) === view.chars) {
+        lastSavedAt = Math.max(lastSavedAt, entry.updatedAt);
+        return;
+      }
+      if (entry.updatedAt < lastSavedAt) return;
+      const para = Math.max(0, Math.min(entry.para, current.paragraphs.length - 1));
+      updateView((draft) => {
+        draft.para = para;
+        draft.chars = Math.max(0, entry.chars ?? 0);
+      });
+      lastSavedAt = entry.updatedAt;
+    });
+
     context.keymap.layer(() => ({
       mode: "global",
       priority: 10,
@@ -277,6 +302,9 @@ export default Plugin.define({
       bindings: ["fish.next", "fish.prev", "fish.toggle", "fish.toggle.h"],
     }));
 
-    return () => unmount();
+    return () => {
+      stopWatching();
+      unmount();
+    };
   },
 });

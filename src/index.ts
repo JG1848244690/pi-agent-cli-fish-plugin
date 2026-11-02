@@ -56,7 +56,7 @@ import {
 import { MATCH_LIMIT, findMatches, indexFrom, normalizeQuery, type Match } from "./search.ts";
 import { FishReaderView, type ReaderActions, type ReaderResult, type ReaderViewState } from "./reader-view.ts";
 import { FishPaletteView, type PaletteMode, type PaletteResult, type PaletteState } from "./search-view.ts";
-import { defaultState, loadState, saveState, type FishState } from "./state.ts";
+import { defaultState, loadState, readDiskState, saveState, watchState, type FishState } from "./state.ts";
 import { FishWidget, widgetBodyWidth, type WidgetPaging, type WidgetTheme } from "./widget.ts";
 
 const WIDGET_ID = "fish";
@@ -96,6 +96,10 @@ function emptySession(): ReaderSession {
 let session = emptySession();
 let store: FishState = defaultState();
 let reader: FishReaderView | null = null;
+/** Stop function for the shared state watcher, one per TUI session. */
+let stopWatching: (() => void) | null = null;
+/** Timestamp of the last entry this process wrote, to ignore our own watcher event. */
+let lastSavedAt = 0;
 
 function fakeNameFor(path: string): string {
   let hash = 0;
@@ -105,20 +109,76 @@ function fakeNameFor(path: string): string {
 
 function persist(): void {
   store.config = { ...store.config, readerLines: session.readerLines };
+  let updatedAt = 0;
   if (session.book) {
     const book = session.book;
     store.last = book.path;
     const chapter = chapterAt(book, session.pos);
+    updatedAt = Date.now();
     store.books[book.path] = {
       para: session.pos.para,
       chars: charsAt(book, session.pos, session.anchor, activeBodyWidth()),
       percent: currentPercent(),
       ...(chapter ? { chapter: chapter.number } : {}),
-      updatedAt: Date.now(),
+      updatedAt,
     };
     if (!store.library.includes(book.path)) store.library.push(book.path);
   }
   saveState(getAgentDir(), store);
+  if (updatedAt) lastSavedAt = updatedAt;
+}
+
+/**
+ * Another Pi/OpenCode process saved the shared state. Refresh the shelf data
+ * and, if it advanced the book we are reading, move this view to the same line.
+ *
+ * Adopting does not write back: that would make the two processes echo each
+ * other. The next local page turn persists from the adopted position.
+ */
+function adoptExternalState(disk: FishState): void {
+  for (const [path, entry] of Object.entries(disk.books)) {
+    const current = store.books[path];
+    if (!current || entry.updatedAt >= current.updatedAt) store.books[path] = entry;
+  }
+  for (const path of disk.library) {
+    if (!store.library.includes(path)) store.library.push(path);
+  }
+
+  const book = session.book;
+  if (!book) return;
+  const entry = disk.books[book.path];
+  if (!entry) return;
+
+  const width = activeBodyWidth();
+  const localChars = charsAt(book, session.pos, session.anchor, width);
+  if (entry.para === session.pos.para && (entry.chars ?? 0) === localChars) {
+    lastSavedAt = Math.max(lastSavedAt, entry.updatedAt);
+    return;
+  }
+  if (entry.updatedAt < lastSavedAt) return;
+
+  const pos = posFromChars(book, Math.min(entry.para, book.paragraphs.length - 1), entry.chars ?? 0, width);
+  session.pos = pos;
+  session.anchor = anchorFor(book, pos, width);
+  lastSavedAt = entry.updatedAt;
+  if (!session.hidden) {
+    reader?.refresh();
+    session.widget?.refresh();
+  }
+}
+
+/** Pull book progress and library from disk without touching session config. */
+function refreshStore(): void {
+  const disk = readDiskState(getAgentDir());
+  for (const [path, entry] of Object.entries(disk.books)) {
+    const current = store.books[path];
+    if (!current || entry.updatedAt >= current.updatedAt) store.books[path] = entry;
+  }
+  for (const path of disk.library) {
+    if (!store.library.includes(path)) store.library.push(path);
+  }
+  if (!store.last && disk.last) store.last = disk.last;
+  if (disk.config.manualSeeded) store.config = { ...store.config, manualSeeded: true };
 }
 
 function currentWidth(): number {
@@ -470,6 +530,8 @@ function startAuto(ctx: ExtensionContext, seconds: number): void {
 // ----------------------------------------------------------------- books ----
 
 function openBook(ctx: ExtensionContext, input: string): boolean {
+  // Another CLI may have advanced this book since this process started.
+  refreshStore();
   const raw = expandHome(input);
   const file = isAbsolute(raw) ? raw : resolve(ctx.cwd, raw);
   if (!existsSync(file)) {
@@ -678,11 +740,17 @@ export default function (pi: ExtensionAPI) {
     if (store.config.resumeOnStart && store.last && existsSync(store.last)) {
       openBook(ctx, store.last);
     }
+    stopWatching?.();
+    stopWatching = watchState(agentDir, adoptExternalState);
   });
 
   pi.on("session_shutdown", () => {
     stopAuto();
+    // Pick up a position another CLI saved while this process was busy.
+    adoptExternalState(readDiskState(agentDir));
     persist();
+    stopWatching?.();
+    stopWatching = null;
   });
 
   const toggleWidget = (ctx: ExtensionContext): void => {
@@ -911,7 +979,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("fish-save", {
     description: "摸鱼：立即保存当前阅读进度",
-    handler: (_args: string, ctx: ExtensionCommandContext) => {
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
       saveNow(ctx);
     },
   });

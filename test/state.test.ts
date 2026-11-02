@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { loadState, migrateLegacyDir, saveState, statePath } from "../src/state.ts";
+import { loadState, migrateLegacyDir, saveState, statePath, watchState } from "../src/state.ts";
 
 const tempAgent = () => mkdtempSync(join(tmpdir(), "pi-fish-state-"));
 
@@ -135,4 +135,31 @@ test("a save clears its lock and leaves no temp file", () => {
   });
   assert.equal(existsSync(`${statePath(agentDir)}.lock`), false);
   assert.equal(existsSync(`${statePath(agentDir)}.${process.pid}.tmp`), false);
+});
+
+test("watchState reports another process's save and stops on cleanup", async () => {
+  const agentDir = tempAgent();
+  const seen: number[] = [];
+  const stop = watchState(agentDir, (state) => seen.push(state.books["/b/a.txt"]?.para ?? -1));
+  const config = { readerLines: 15, placement: "aboveEditor" as const, resumeOnStart: true };
+
+  const eventually = async (predicate: () => boolean) => {
+    const deadline = Date.now() + 2000;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error(`timed out; saw ${JSON.stringify(seen)}`);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  };
+
+  saveState(agentDir, { library: ["/b/a.txt"], books: { "/b/a.txt": { para: 1, updatedAt: 10 } }, config });
+  await eventually(() => seen.includes(1));
+
+  saveState(agentDir, { library: ["/b/a.txt"], books: { "/b/a.txt": { para: 2, updatedAt: 20 } }, config });
+  await eventually(() => seen.includes(2));
+
+  stop();
+  const count = seen.length;
+  saveState(agentDir, { library: ["/b/a.txt"], books: { "/b/a.txt": { para: 3, updatedAt: 30 } }, config });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(seen.length, count, "no more events after cleanup");
 });

@@ -281,7 +281,8 @@ export class FishPaletteView implements Component {
   private hitRow(slot: number): string {
     const match = this.hits[slot];
     const selected = slot === this.selected;
-    const percent = `${percentAtChars(this.state.book, this.bookChars(match))}%`;
+    const book = this.state.book;
+    const percent = `${book ? percentAtChars(book, this.bookChars(match)) : 0}%`;
     // Books without chapter headings would waste six columns on blank padding,
     // so the column only exists when something can fill it.
     const chapter = this.hasChapters() ? this.chapter(match).padEnd(6, " ") : "";

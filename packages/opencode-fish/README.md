@@ -10,8 +10,9 @@ OpenCode TUI 版的「单行摸鱼看书」。目前在 `feat/opencode-fish` 分
 - `/fish-save` 手动保存；
 - `/fish-close` 合上；`alt+m` / `alt+h` 显示/隐藏（或 `/fish-hide`、`/fish-show`）；
 - 进度和 Pi 版**共用** `~/.pi/agent/fish/state.json`（或 `PI_CODING_AGENT_DIR` 指向的目录）：在 Pi 里读到 42%，切到 OpenCode `/fish` 打开同一本，就接在 42% 那一行；
+- **实时同步**：两边都监听这个文件，对方翻页后这边大约 50ms 内跟到同一行；多个 OpenCode 窗口之间也一样；
 - 启动时按 Pi 的 `resumeOnStart` 设置自动恢复上次的书；
-- 写入走和 Pi 版同一套「锁 + 按书合并」，两边同时开不会互相回退不同书的进度；同一本书以最后保存为准。
+- 写入走和 Pi 版同一套「锁 + 按书合并」，两边同时开不会互相回退不同书的进度；同一本书以最后保存为准（两边都在翻时会互相带着走）。
 
 ## 安装
 
