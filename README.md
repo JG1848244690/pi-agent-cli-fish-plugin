@@ -184,3 +184,9 @@ rm -r ~/.pi/agent/fish
 - 常驻行一次只显示一行，读起来偏慢；要快就进阅读模式。
 - 搜索悬浮窗固定只列 5 条，再往后靠 `alt+n`（阅读模式里 `n`/`N` 前后都行）。
 - 依赖 Pi 1.x 扩展 API（`setWidget` / `custom` / `registerShortcut` / `registerCommand`），大版本升级后建议回归一次。
+
+## OpenCode 版（实验）
+
+同一套阅读引擎的 OpenCode TUI 移植在 `packages/opencode-fish`（分支 `feat/opencode-fish`）。目前只有常驻一行 + 键盘翻页 + `/fish-save`，没有鼠标和多行阅读模式，详见该目录的 README。
+
+Pi 版仍然在仓库根目录，安装路径不变；等 OpenCode 版跑通后再把 Pi 包迁进 `packages/` 做完整 monorepo。
