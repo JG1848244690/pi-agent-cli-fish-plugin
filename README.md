@@ -1,54 +1,121 @@
-# pi-fish
+# fish — 在 AI CLI 里摸鱼看书
 
-在 Pi 里读本地小说。**严格两种形态**（新手先看 [TUTORIAL.md](TUTORIAL.md)，一步步的完整教程；本文件是速查参考）：
-
-| 形态 | 出现方式 | 显示 |
-|---|---|---|
-| 常驻行 | 一直在，`alt+m` / `alt+h` 隐藏 | **永远只有 1 行**，无标题、无边框，行尾一个总进度百分比 |
-| 阅读模式 | 输入 `/fish` 或 `/fish-read` | 多行（默认 15 行），键盘直接翻页 |
-
-常驻行长这样，看起来像上一条工具输出折行后剩下的一行：
+在 **Pi** 和 **OpenCode** 的界面里读本地小说：平时缩成一行灰字，混在工具输出里；想看多行就打开阅读模式。书和进度都在本地，不注册 LLM 工具，不进模型上下文。
 
 ```
    ⎿  陈平安蹲在泥瓶巷的墙根下，看着檐下那串风铃发呆。风一吹，铃声很轻     7%
 ```
 
-## 快速开始
+> 本文档对应 `feat/opencode-fish` 分支。`main` 只有 Pi 版，详见下面的分支说明。
+
+## 分支说明
+
+| 分支 | 内容 | 适合 |
+|---|---|---|
+| `main` | Pi 插件（仓库根目录） | 只想在 Pi 里用 |
+| `feat/opencode-fish` | Pi 插件 + OpenCode TUI 插件（`packages/opencode-fish`） | 想 Pi / OpenCode 一起用，或想试实时进度同步 |
+
+- `main` 是稳定线；`feat/opencode-fish` 是当前开发线，多了 OpenCode 版、`alt+h`、跨 CLI 实时同步。
+- OpenCode 版目前是**实验性**的：只有常驻一行 + 键盘翻页，没有鼠标和多行阅读模式。
+- 分支还没合并回 `main`。
+- 以后会迁成完整 monorepo：`packages/core` + `packages/pi-fish` + `packages/opencode-fish`，然后分别发布 npm。现在为了不破坏本机 Pi 的加载路径，Pi 包仍在仓库根目录。
+
+## 安装
+
+### Pi（`main` 或本分支）
 
 ```bash
-pi
-/fish-add D:\books\剑来.txt     # 加一本 .txt
-/fish-add D:\books\剑来.epub    # 或一本 .epub
-/fish-add D:\books              # 或一整个文件夹（扫描 *.txt / *.epub）
-/fish                           # 接着上次读到的地方，进入多行阅读模式
+git clone https://github.com/JG1848244690/pi-agent-cli-fish-plugin.git
+pi install D:\path\to\pi-fish
 ```
 
-`/fish-add` 不带参数会弹输入框，默认填上次所在目录。
+发布到 npm 之后也可以：
 
-下次启动 `pi`，上次那本书会自动回到常驻行（`/fish resume off` 可关）。
+```bash
+pi install npm:pi-fish
+```
 
-**第一次启动会把自带的《手册》放进书架**（只加这一次）：整篇 [TUTORIAL.md](TUTORIAL.md) 会被生成成一本 10 章的电子书（`~/.pi/agent/fish/手册.md`），用插件自己的方式读插件自己的说明。书库本来是空的话 `/fish` 直接打开它；已经有书的话你的书照旧接着读，手册排在书架里随时能翻。`TUTORIAL.md` 更新后这份会重新生成，不想要了把它从书架删掉就行，不会再加回来。
+第一次启动：
 
-## 常驻行（1 行）
+```bash
+/fish-add D:\books\剑来.txt     # 加一本 .txt
+/fish-add D:\books\剑来.epub    # 或 .epub
+/fish-add D:\books              # 或整个文件夹
+/fish                           # 接着上次的位置，进阅读模式
+```
 
-- 只有一行正文，`⎿` 缩进、灰色，正文最长 66 列；行尾跟一个总进度百分比（整行 78 列）；
-- **鼠标翻页**（推荐）：点一下 = 下一行；双击 = 下一屏（阅读模式的行数）；右键 / 中键 / `shift`+左键 = 上一行（双击 = 上一屏）；滚轮 = 一行一格，`alt`+滚轮 = 一屏；
-- 键盘翻页：`alt+j` 下一行，`alt+k` 上一行（不是 `ctrl+shift+字母`，那个在多数终端里会被当成回车/删行，把输入框搞乱）；
+`/fish-add` 不带参数会弹路径输入框，默认填上次所在目录。
+
+**第一次启动会把自带的《手册》放进书架**（只加一次）：整篇 [TUTORIAL.md](TUTORIAL.md) 会生成成一本 10 章的电子书（`~/.pi/agent/fish/手册.md`）。书库为空时 `/fish` 直接打开它；已经有书就照常读，手册留在书架里。`TUTORIAL.md` 更新后会自动重新生成。
+
+### OpenCode（仅本分支）
+
+```bash
+git switch feat/opencode-fish
+cd packages/opencode-fish
+npm install
+```
+
+在 `cli.json`（Windows 通常是 `C:\Users\<你>\.config\opencode\cli.json`）里加：
+
+```json
+{
+  "plugins": ["D:/path/to/pi-fish/packages/opencode-fish"]
+}
+```
+
+重启 OpenCode TUI（插件源码变化时热重载不一定重新加载模块），然后：
+
+```
+/fish D:\books\剑来.txt
+```
+
+## 进度共享与实时同步
+
+Pi 和 OpenCode **共用同一个进度文件**：
+
+```
+~/.pi/agent/fish/state.json
+```
+
+（如果设置了 `PI_CODING_AGENT_DIR`，两边都用那个目录。）
+
+- 每次翻页、跳章、开书、`/fish-save` 都会写盘；
+- 写盘流程：加锁 → 读盘 → 按每本书的 `updatedAt` 合并 → 临时文件原子替换；
+- 不同书的进度互不覆盖；书库取并集；配置只覆盖自己改过的字段；
+- 两边都监听这个文件：**一边翻页，另一边约 50ms 内跟到同一行**；
+- 同一本书两边同时不停翻时会互相带着走，最终以最后保存为准；
+- 被同步的一方只移动显示位置，不会反向写盘，所以不会无限来回。
+
+当前只做**同一台机器**。跨设备同步（云盘 / 自建服务）还没做，详见文末路线。
+
+> 插件以前叫 `moyu`，旧目录 `~/.pi/agent/moyu/` 会在 Pi 启动时自动搬到 `fish/`，书架和进度都保留（只搬一次）。
+
+## Pi 用法
+
+Pi 版有两种形态：
+
+| 形态 | 出现方式 | 显示 |
+|---|---|---|
+| 常驻行 | 一直在，`alt+m` / `alt+h` 隐藏 | **永远只有 1 行**，无标题、无边框，行尾一个总进度百分比 |
+| 阅读模式 | `/fish` 或 `/fish-read` | 多行（默认 15 行），键盘直接翻页 |
+
+### 常驻行
+
+- 正文最长 66 列，整行 78 列；终端太窄时进度百分比自动让位；
+- 鼠标：左键 = 下一行；双击 = 下一屏；右键 / 中键 / `shift`+左键 = 上一行（双击 = 上一屏）；滚轮 = 一行一格；`alt`+滚轮 = 一屏；
+- 键盘：`alt+j` 下一行，`alt+k` 上一行（不要用 `ctrl+shift+字母`，终端会把它当成回车/删行）；
 - `/fish hide` / `/fish show` 隐藏/恢复；
-- `/fish auto 8` 自动往下滚；
-- 行尾百分比是**整本书**的进度，按当前这行算，翻一页涨一点；读到最后一页固定 100%；终端窄到放不下时自动不显示（正文让位）；
-- 这个百分比**全局统一**：按字符算，跟终端宽度无关，常驻行、阅读模式、书架、搜索结果里都是同一个数，`/fish status` 也是它；
-- `/fish status` 还能看到章节号和文件名。
+- `/fish auto 8` 每 8 秒自动下一行；`/fish auto off` 停；
+- 百分比按**全书字符**算，和终端宽度无关：常驻行、阅读模式、书架、搜索结果、`/fish status` 都是同一个数；读完固定 100%。
 
-常驻行**没有**多行模式，行数不可调——想多看几行只能用阅读模式。
-
-> 鼠标只在 Pi 的全屏模式（默认 `tuiMode: fullscreen`）下可用；老式 regular（inline）模式里终端自己管鼠标，这时用 `alt+j`/`alt+k`。
+> 鼠标只在 Pi 全屏模式（默认 `tuiMode: fullscreen`）下可用；老式 regular（inline）模式下用 `alt+j` / `alt+k`。
 >
-> 有些终端会把右键留给自己：VS Code 集成终端默认右键弹菜单/粘贴；Orca 自带终端在 Windows 上默认「右键粘贴」（设置 → Terminal → Right-click to paste），而且没有“转发给应用”的选项，右键根本到不了 Pi；Windows Terminal 也可能这样（Pi 对 VS Code 专门跳过自己的右键粘贴）。这种情况下换用**中键**、`shift`+左键、滚轮上滚或 `alt+k` 往回翻即可。cmd/Windows Terminal 里右键正常。
+> 有些终端会扣住右键：VS Code 集成终端默认右键弹菜单/粘贴；Orca 自带终端在 Windows 上默认「右键粘贴」（设置 → Terminal → Right-click to paste），而且没有“转发给应用”的选项。这种情况用**中键**、`shift`+左键、滚轮上滚或 `alt+k`。
 >
-> Orca 的终端还会把一个滚轮格的像素位移换算成多行，再拆成多条滚轮事件重放给应用（它的 TUI 滚动实现），所以一格可能连翻好几次。插件会把同一时刻连续的、同方向的滚轮事件合并成一次翻页；cmd / Windows Terminal 不受影响。
+> Orca 还会把一个滚轮格的像素位移拆成多条滚轮事件重放；插件会把同一时刻、同方向的连续事件合并成一次翻页。
 
-## 阅读模式（多行）
+### 阅读模式
 
 `/fish` 打开，占住键盘：
 
@@ -59,54 +126,38 @@ pi
 | 滚轮 / `alt`+滚轮 | 一页 / 一章 |
 | `]` / `[` | 下一章 / 上一章 |
 | `/` | 打开搜索悬浮窗（同 `/fish-find`） |
-| `n` / `N` | 下一处 / 上一处匹配（不弹窗） |
+| `n` / `N` | 下一处 / 上一处匹配 |
 | `a` | 开关自动翻页（8 秒/页） |
 | `b` | 老板键：阅读器和常驻行一起消失 |
 | `q` / `esc` | 退出阅读，常驻行停在当前位置 |
 
-行数可调：`/fish reader-lines 12`（默认 15）。
+行数：`/fish reader-lines 12`（默认 15）。
 
-## 悬浮窗：书架 + 搜索
+### 悬浮窗：书架 + 搜索
 
 一个悬浮窗，两个模式，`tab` 切换：
 
-- **书架**——书库列表，打字过滤书名，点一本就打开它；
-- **搜索**——全文搜当前这本书，边打边出结果，选一条直接跳过去。
+- **书架**：打字过滤书名，点一本就打开它，并直接切到搜索模式；
+- **搜索**：全文搜当前这本书，边打边出结果，选一条跳过去。
 
 ```
-/fish-list            打开书架（选书 / 换书，点完接着搜它的内容）
-/fish-find 陈平安     搜索悬浮窗，边打边出结果，选一条直接跳过去
-/fish-find            搜索悬浮窗（关键词留空就是从头找）
+/fish-list            打开书架
+/fish-find 陈平安     搜索，选一条直接跳过去
+/fish-find            搜索（关键词留空从头找）
 /fish-find off        去掉高亮，就地继续读
 ```
 
-悬浮窗占屏幕中间一大块（宽的 70%），固定 12 行，不会随着结果多少跳来跳去。
+细节：
 
-### 书架
+- 书架每行显示：`*` 当前书、进度百分比、章节号；
+- 搜索一次最多显示 5 条，`↑`/`↓` 或滚轮选择，`⏎` 或鼠标点击跳转；
+- 跳转落在**真正包含命中的那一行**，不是段落开头；
+- 命中词高亮；`/fish-find off` 取消；
+- 一本书最多收集 500 处命中，标题显示 `60+` 提醒换更长关键词；
+- 从当前阅读位置往后找，到底自动绕回开头；
+- 跳转后常驻行和阅读模式都会跟到命中行；阅读模式里命中词保持高亮，`/fish-find off` 取消。
 
-- 每行一本：`*` 是正在读的那本，右边是**整本书的进度百分比**和章节号；
-- 打字过滤书名（不区分大小写）；
-- `↑` / `↓` 或滚轮选，`⏎` / **鼠标点那行** ＝ 打开这本书，并且**直接切到搜索模式**搜它的内容——「点书 → 打字 → 回车」就把某个书里的一句话找出来了；
-- 从 `/fish` 进来（还没打开书时）挑完书，搜完或 `esc` 取消后会直接进阅读模式；从 `/fish-list` 进来的挑完就停在常驻行。
-
-### 搜索
-
-- 直接打字，**每敲一个字就重新搜索**；一次最多显示 **5 处**命中，不刷屏；
-- `↑` / `↓` 选，`⏎` 或**鼠标点某一条**直接跳过去，`esc` 取消；
-- 标题里写着在搜哪本书、命中多少处（`搜索 · 剑来.txt · 60+ 处命中`）；
-- 跳过去之后还想看下一处：`alt+n` 就行（阅读模式里还有 `N` 往回跳），不用再开窗；
-- 每条显示：序号、整本书的进度百分比、章节号、上下文片段，**命中的词用强调色**标出来；
-- 打开时从你当前读到的位置往后列，到底了自动从头绕回来。
-
-跳转后：
-
-- 落在**真正包含命中的那一行**，不是段落开头；
-- 阅读模式里命中的词高亮，周围正文保持灰色；`/fish-find off` 去掉高亮，就地继续读；
-- 常驻行也会跟着跳（只有一行，词可能被截断，看进度百分比确认位置）。
-
-一本书最多收集 500 处命中（`的`、`了` 这种词），标题会显示成 `60+` 提醒你换个更长的词。
-
-## 命令
+### 命令
 
 ```
 /fish-add [file|folder]     加书；省略参数弹出路径输入框
@@ -114,10 +165,10 @@ pi
 /fish-read                  进入阅读模式（同 /fish）
 /fish-save                  立即保存当前阅读进度
 /fish-find [关键词|off]      搜索悬浮窗；off 去掉高亮
-/fish-list                  打开书架（选书 / 换书，点完接着搜它的内容）
+/fish-list                  打开书架
 /fish next [n] / prev [n]   常驻行前进/后退 n 行
 /fish chapter / back-chapter
-/fish auto 8                自动翻页，/fish auto off 关闭
+/fish auto 8                自动翻页；/fish auto off 关闭
 /fish hide / show           老板键
 /fish reader-lines 12       阅读模式行数
 /fish resume off            关掉「启动自动恢复上次阅读」
@@ -125,68 +176,131 @@ pi
 /fish close                 合上书并移除常驻行
 ```
 
-> 插件以前叫 `moyu`，旧目录 `~/.pi/agent/moyu/` 在启动时会自动搬到 `~/.pi/agent/fish/`，书架和进度都跟着走（自动迁移只做一次，不覆盖已存在的 `fish/`）。
+全局快捷键：
 
-全局快捷键：`alt+m` / `alt+h` 显示/隐藏，`alt+j` 下一行，`alt+k` 上一行，`alt+n` 下一处搜索命中。
+| 键 | 作用 |
+|---|---|
+| `alt+m` / `alt+h` | 显示 / 隐藏常驻行 |
+| `alt+j` / `alt+k` | 下一行 / 上一行 |
+| `alt+n` | 下一处搜索命中（没搜索时打开搜索窗） |
 
-> 用 `alt+字母`而不是 `ctrl+shift+字母`：终端没有 Kitty 键盘协议时，`ctrl+shift+j` 会被当成 `ctrl+j`（换行）、`ctrl+shift+k` 当成 `ctrl+k`（删到行尾）、`ctrl+shift+m` 当成回车——按下去会把输入框里的命令弄坏。
+> 用 `alt+字母` 而不是 `ctrl+shift+字母`：终端没有 Kitty 键盘协议时，`ctrl+shift+j` 会被当成 `ctrl+j`（换行）、`ctrl+shift+k` 当成 `ctrl+k`（删到行尾），把输入框弄坏。
+
+## OpenCode 用法
+
+目前只有常驻一行，显示在 composer 上方。
+
+| 命令 / 键 | 作用 |
+|---|---|
+| `/fish <path>` | 打开书；不带参数恢复上次的书 |
+| `alt+j` / `/fish-next` | 下一行 |
+| `alt+k` / `/fish-prev` | 上一行 |
+| `/fish-save` | 立即保存 |
+| `/fish-close` | 合上（进度保留） |
+| `alt+m` / `alt+h` | 显示 / 隐藏 |
+| `/fish-hide` / `/fish-show` | 隐藏 / 显示 |
+
+限制：
+
+- 没有鼠标翻页（OpenCode TUI 插件 API 不暴露鼠标事件）；
+- 没有多行阅读模式；
+- 宽度固定 66 列；
+- 进度与 Pi 共享，实时跟随。
 
 ## 隐蔽性设计
 
 - **常驻就是一行**：无标题、无边框，正文最长 66 列，行尾只有一个百分比；
 - **不注册 LLM 工具**：正文永远不进模型上下文，不花 token；
-- **不写 Pi 会话**：书库和进度存在 `~/.pi/agent/fish/state.json`，会话记录里没有书名和路径；
-- **多开不打架，并且实时同步**：多个 Pi / OpenCode 同时读不同的书时，保存会按书合并进度（`updatedAt` 新的胜出）、书库取并集，再用跨实例锁和临时文件原子替换；同一台机器上还会监听 `state.json`，别的会话翻页后当前行约 50ms 内跟着走。同一本书两边都在翻时以最后保存为准。
-- **老板键是真空的**：`b` 直接销毁常驻行和阅读器；
+- **不写 Pi 会话**：书库和进度在 `~/.pi/agent/fish/state.json`，会话记录里没有书名和路径；
+- **老板键是真空的**：阅读模式里 `b` 直接销毁阅读器和常驻行；`alt+h` / `alt+m` 也可以只隐藏常驻行；
 - 命令描述都是中性的（"Add a local text file or folder"）。
 
-## 文件
+## 项目结构
+
+```
+.
+├── src/                      Pi 插件的源码（根目录包）
+├── packages/
+│   └── opencode-fish/        OpenCode TUI 插件（实验）
+├── test/                     Pi 引擎/组件测试
+├── TUTORIAL.md               Pi 内置《手册》的源文件
+└── package.json              Pi 包定义 + 测试脚本
+```
 
 | 文件 | 职责 |
 |---|---|
-| `src/index.ts` | 命令、快捷键、会话生命周期、两种形态的切换与翻页 |
+| `src/index.ts` | Pi 命令、快捷键、会话生命周期、两种形态切换、实时同步 |
 | `src/reader.ts` | 编码探测（UTF-8 → GB18030 回退）、段落/章节解析、中文双宽折行、翻页数学；按扩展名分发到 EPUB |
 | `src/epub.ts` | 零依赖 EPUB：ZIP（stored/deflate）→ OPF spine → XHTML 提段落，章节来自 nav.xhtml / toc.ncx / 标题 |
 | `src/paging.ts` | 前后翻页与位置锚定（跨宽度不跳字、读到结尾不再循环） |
-| `src/search.ts` | 全文搜索：匹配偏移、上下文片段、前后循环、悬浮窗要的 5 条窗口（纯函数） |
-| `src/search-view.ts` | 悬浮窗组件：书架 + 搜索两个模式（实时输入 + 5 条 + 鼠标点选） |
-| `src/reader-view.ts` | 多行阅读模式组件（占键盘、按键映射、渲染） |
+| `src/search.ts` | 全文搜索：匹配偏移、上下文片段、前后循环、5 条窗口（纯函数） |
+| `src/search-view.ts` | 悬浮窗组件：书架 + 搜索 |
+| `src/reader-view.ts` | 多行阅读模式组件 |
 | `src/widget.ts` | 常驻单行组件（固定 1 行） |
-| `src/manual.ts` | 把 TUTORIAL.md 生成成可读的《手册》电子书（去 markdown、标题变章节） |
-| `src/state.ts` | 书库、进度、配置的合并写入（跨实例锁 + 临时文件原子替换） |
+| `src/state.ts` | 书库/进度/配置的合并写入（跨实例锁、原子替换、文件监听） |
 | `src/library.ts` | 路径 → 书单（`.txt` / `.epub`，支持文件夹、`~`、引号） |
+| `src/manual.ts` | 把 TUTORIAL.md 生成成可读的《手册》电子书 |
+| `src/wheel.ts` | 合并终端重放的滚轮事件 |
+| `packages/opencode-fish/src/tui.tsx` | OpenCode TUI 适配层（composer slot、命令、实时同步） |
 
-翻页以**段落 + 段内行偏移**为单位；进度额外记一个段内字符偏移，所以常驻行（72 列）和阅读模式（终端宽 - 6）之间来回切、或者重启后换了个窗口大小，都不会跳字。
+翻页以**段落 + 段内行偏移**为单位；进度额外记段内字符偏移，所以常驻行（72 列）和阅读模式（终端宽 - 6）之间切换、或者换窗口大小，都不会跳字。
 
 ## 开发
 
+Pi 测试（Node 24 直接跑 TypeScript，无需构建）：
+
 ```bash
-cd pi-fish
-node --test test/reader.test.ts test/library.test.ts test/epub.test.ts test/manual.test.ts test/paging.test.ts test/search.test.ts test/widget.test.ts
-node test/preview.ts ..\剑来.txt 80 6    # 不开 Pi 预览阅读模式渲染
+npm test
+node test/preview.ts ..\剑来.txt 80 6   # 不开 Pi 预览阅读模式渲染
 ```
 
-改完源码 `/reload` 热重载。
+OpenCode 插件类型检查：
 
-## 卸载
+```bash
+cd packages/opencode-fish
+npm install
+npm run typecheck
+```
+
+改完 Pi 源码后在 Pi 里 `/reload`；改完 OpenCode 插件后重开 TUI。
+
+## 分发与后续路线
+
+现在的代码已经接近可发布：
+
+- **Pi**：`package.json` 里有 `pi.extensions`、`pi-package` keyword、`files`、peer 依赖，可直接 `npm publish`；
+- **OpenCode**：`packages/opencode-fish` 有 `exports["./tui"]`，可作为 TUI-only 包加入 `cli.json`。
+
+发布前要做的：
+
+1. 抽 `packages/core`（reader / epub / paging / search / state / library），两个适配层都依赖它；
+2. 把 Pi 包迁到 `packages/pi-fish`，做完整 npm workspaces + changesets + CI；
+3. 之后可以加更多 CLI 适配层；没有常驻 UI 的 CLI 用“独立 `fish` TUI + 命令壳/状态栏”兜底；
+4. 跨设备同步（可选）：云盘同步 state 文件，或自建服务（内容指纹 + 鉴权 + 离线队列）。
+
+跨设备同步**目前没做**：现在只保证同一台机器上的多个 Pi / OpenCode 会话实时一致。
+
+## 卸载与数据
+
+Pi：
 
 ```bash
 pi remove ./pi-fish
-rm -r ~/.pi/agent/fish
+rm -r ~/.pi/agent/fish      # 连书库和进度一起删
 ```
+
+OpenCode：从 `cli.json` 的 `plugins` 里删掉 `packages/opencode-fish` 即可；进度文件共用，删不删看你还用不用 Pi 版。
 
 ## 限制
 
-- 支持 `.txt`（UTF-8 / GB18030 自动识别）、`.epub`（EPUB 2/3，无 DRM）和 `.md`（当纯文本读）。
-- EPUB 里的图片、表格样式不保留，只取文字；`<pre>` 里的换行会被合并。
-- 加密/DRM 的 EPUB、以及 ZIP64 打包的 EPUB 会报错跳过。
-- 自己加的 `.md` 按纯文本显示，`#`、`**` 这些标记会原样露出来（只有内置《手册》是生成时清洗过的）。
-- 常驻行一次只显示一行，读起来偏慢；要快就进阅读模式。
-- 搜索悬浮窗固定只列 5 条，再往后靠 `alt+n`（阅读模式里 `n`/`N` 前后都行）。
-- 依赖 Pi 1.x 扩展 API（`setWidget` / `custom` / `registerShortcut` / `registerCommand`），大版本升级后建议回归一次。
+- 支持 `.txt`（UTF-8 / GB18030 自动识别）、`.epub`（EPUB 2/3，无 DRM）和 `.md`（当纯文本读）；
+- EPUB 里的图片、表格样式不保留，只取文字；`<pre>` 里的换行会被合并；
+- 加密/DRM 的 EPUB、ZIP64 打包的 EPUB 会报错跳过；
+- 自己加的 `.md` 按纯文本显示，`#`、`**` 会原样露出（只有内置《手册》是生成时清洗过的）；
+- 常驻行一次只显示一行，读起来偏慢；要快就进阅读模式；
+- 搜索悬浮窗固定只列 5 条，再往后靠 `alt+n`（阅读模式里 `n`/`N`）；
+- Pi 版依赖 Pi 1.x 扩展 API（`setWidget` / `custom` / `registerShortcut` / `registerCommand`），大版本升级后建议回归一次。
 
-## OpenCode 版（实验）
+## License
 
-同一套阅读引擎的 OpenCode TUI 移植在 `packages/opencode-fish`（分支 `feat/opencode-fish`）。目前只有常驻一行 + 键盘翻页 + `/fish-save`，没有鼠标和多行阅读模式；进度和 Pi 版共用 `~/.pi/agent/fish/state.json`，并且实时互相跟随（监听文件，约 50ms）。详见该目录的 README。
-
-Pi 版仍然在仓库根目录，安装路径不变；等 OpenCode 版跑通后再把 Pi 包迁进 `packages/` 做完整 monorepo。
+MIT
