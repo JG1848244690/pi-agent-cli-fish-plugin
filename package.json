@@ -1,0 +1,36 @@
+{
+  "name": "pi-fish",
+  "version": "0.1.0",
+  "description": "Local novel reader that lives in Pi's widget area and looks like a Read tool result",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "novel",
+    "reader",
+    "epub",
+    "tui"
+  ],
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/reader.test.ts test/state.test.ts test/library.test.ts test/epub.test.ts test/manual.test.ts test/paging.test.ts test/search.test.ts test/widget.test.ts test/wheel.test.ts",
+    "preview": "node test/preview.ts",
+    "prepublishOnly": "npm test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "license": "MIT",
+  "files": [
+    "src",
+    "TUTORIAL.md",
+    "README.md",
+    "LICENSE"
+  ]
+}
