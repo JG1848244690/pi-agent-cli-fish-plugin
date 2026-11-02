@@ -37,6 +37,7 @@ export default Plugin.define({
 
     // Loaded book content. Progress itself lives in `saved`; this is the text.
     let book: Book | null = null;
+    let unregisterSlot: (() => void) | null = null;
 
     const toast = (message: string, variant: "info" | "success" | "warning" | "error" = "info") =>
       context.ui.toast.show({ message, variant });
@@ -82,6 +83,7 @@ export default Plugin.define({
         draft.updatedAt = Date.now();
       });
       toast(`fish: ${basename(file)}`, "success");
+      mount();
       return true;
     };
 
@@ -118,6 +120,7 @@ export default Plugin.define({
 
     const close = (): void => {
       book = null;
+      unmount();
       void updateSaved((draft) => {
         draft.path = "";
         draft.para = 0;
@@ -135,22 +138,30 @@ export default Plugin.define({
       });
     };
 
+    const mount = (): void => {
+      if (unregisterSlot) return;
+      unregisterSlot = context.ui.slot({
+        append: "session.composer.top",
+        render: () => {
+          if (!book || saved.hidden) return null;
+          const pos = currentPos();
+          const line = pos ? pageAt(book, pos, BODY_WIDTH, 1).lines[0] : undefined;
+          if (!pos || !line) return null;
+          const percent = atBookEnd(book, pos, BODY_WIDTH, 1) ? 100 : percentAt(book, pos, BODY_WIDTH);
+          const body = `${GUTTER}${line.text}`;
+          const pad = Math.max(GAP, BODY_WIDTH + GUTTER.length - line.text.length - PROGRESS_SLOT);
+          return <text fg={context.theme.text.muted}>{`${body}${" ".repeat(pad)}${`${percent}%`.padStart(PROGRESS_SLOT)}`}</text>;
+        },
+      });
+    };
+
+    const unmount = (): void => {
+      unregisterSlot?.();
+      unregisterSlot = null;
+    };
+
     // Resume the last book on TUI start.
     if (saved.path) open(saved.path, { para: saved.para, chars: saved.chars });
-
-    context.ui.slot({
-      append: "session.composer.top",
-      render: () => {
-        if (saved.hidden || !book) return <text> </text>;
-        const pos = currentPos();
-        const line = pos ? pageAt(book, pos, BODY_WIDTH, 1).lines[0] : undefined;
-        if (!pos || !line) return <text> </text>;
-        const percent = atBookEnd(book, pos, BODY_WIDTH, 1) ? 100 : percentAt(book, pos, BODY_WIDTH);
-        const body = `${GUTTER}${line.text}`;
-        const pad = Math.max(GAP, BODY_WIDTH + GUTTER.length - line.text.length - PROGRESS_SLOT);
-        return <text fg={context.theme.text.muted}>{`${body}${" ".repeat(pad)}${`${percent}%`.padStart(PROGRESS_SLOT)}`}</text>;
-      },
-    });
 
     context.keymap.layer(() => ({
       mode: "global",
@@ -200,5 +211,7 @@ export default Plugin.define({
       ],
       bindings: ["fish.next", "fish.prev", "fish.toggle"],
     }));
+
+    return () => unmount();
   },
 });
