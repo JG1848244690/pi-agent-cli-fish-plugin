@@ -1,18 +1,25 @@
 /**
  * OpenCode TUI spike.
  *
- * The novel engine is still the one in the Pi package (`../../src`); it is pure
- * TypeScript with no Pi imports, so the TUI can reuse it while this port is
- * being validated. Once the interaction works, the engine moves into
- * `packages/core` and both plugins depend on it.
+ * Progress is deliberately stored in the same file as the Pi plugin
+ * (`<agent dir>/fish/state.json`) through the shared state module, so reading a
+ * book in Pi and then opening it in OpenCode lands on the same line. The state
+ * module's lock + per-book merge keeps two running instances from rolling each
+ * other back.
+ *
+ * The novel engine is also reused from the Pi package for now; both move to
+ * `packages/core` once this interaction is validated.
  */
 
 import { Plugin } from "@opencode/plugin/tui";
 
-import { basename, isAbsolute, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, isAbsolute, join, resolve } from "node:path";
 
 import { advanceFrom, anchorFor, atBookEnd, backFrom, charsAt, posFromChars } from "../../../src/paging.ts";
-import { loadBook, pageAt, percentAt, type Book, type Pos } from "../../../src/reader.ts";
+import { chapterAt, loadBook, pageAt, percentAt, type Book, type Pos } from "../../../src/reader.ts";
+import { loadState, saveState, type FishState } from "../../../src/state.ts";
 
 /** The single-line widget wraps at 66 columns, like the Pi version. */
 const BODY_WIDTH = 66;
@@ -20,22 +27,29 @@ const GUTTER = "   ⎿  ";
 const PROGRESS_SLOT = 6;
 const GAP = 2;
 
-interface Saved {
-  path: string;
-  para: number;
-  chars: number;
-  hidden: boolean;
-  updatedAt: number;
+/** Pi's agent directory, so both plugins resolve the same fish/state.json. */
+function piAgentDir(): string {
+  const env = process.env.PI_CODING_AGENT_DIR?.trim();
+  if (!env) return join(homedir(), ".pi", "agent");
+  if (env === "~") return homedir();
+  if (env.startsWith("~/") || env.startsWith("~\\")) return join(homedir(), env.slice(2));
+  return env;
 }
 
 export default Plugin.define({
   id: "fish.opencode",
   setup(context) {
-    const [saved, updateSaved] = context.storage.store<Saved>("fish", {
-      initial: { path: "", para: 0, chars: 0, hidden: false, updatedAt: 0 },
+    const agentDir = piAgentDir();
+    let piState: FishState = loadState(agentDir);
+
+    // UI-only state: the displayed position and whether the line is hidden.
+    // Kept in memory so the slot re-renders on every page turn; the durable
+    // progress itself lives in Pi's state file.
+    const [view, updateView] = context.storage.memory("fish.view", {
+      initial: { para: 0, chars: 0, hidden: false },
     });
 
-    // Loaded book content. Progress itself lives in `saved`; this is the text.
+    // Loaded book content. Progress itself lives in `view` / Pi's state file.
     let book: Book | null = null;
     let unregisterSlot: (() => void) | null = null;
 
@@ -44,22 +58,46 @@ export default Plugin.define({
 
     const currentPos = (): Pos | null => {
       if (!book) return null;
-      const para = Math.max(0, Math.min(saved.para, book.paragraphs.length - 1));
-      return posFromChars(book, para, saved.chars, BODY_WIDTH);
+      const para = Math.max(0, Math.min(view.para, book.paragraphs.length - 1));
+      return posFromChars(book, para, view.chars, BODY_WIDTH);
     };
 
-    const commit = (pos: Pos): void => {
+    const percentOf = (pos: Pos): number =>
+      book ? (atBookEnd(book, pos, BODY_WIDTH, 1) ? 100 : percentAt(book, pos, BODY_WIDTH)) : 0;
+
+    /** Write the current line into Pi's state file (merge happens there). */
+    const persist = (): void => {
+      if (!book) return;
+      const pos = currentPos();
+      if (!pos) return;
+      const chars = charsAt(book, pos, anchorFor(book, pos, BODY_WIDTH), BODY_WIDTH);
+      const chapter = chapterAt(book, pos);
+      piState.last = book.path;
+      piState.books[book.path] = {
+        para: pos.para,
+        chars,
+        percent: percentOf(pos),
+        ...(chapter ? { chapter: chapter.number } : {}),
+        updatedAt: Date.now(),
+      };
+      if (!piState.library.includes(book.path)) piState.library.push(book.path);
+      saveState(agentDir, piState);
+    };
+
+    const setPos = (pos: Pos): void => {
       if (!book) return;
       const chars = charsAt(book, pos, anchorFor(book, pos, BODY_WIDTH), BODY_WIDTH);
-      void updateSaved((draft) => {
+      updateView((draft) => {
         draft.para = pos.para;
         draft.chars = chars;
-        draft.updatedAt = Date.now();
       });
+      persist();
     };
 
     const open = (raw: string, resume?: { para: number; chars: number }): boolean => {
-      const input = raw.trim() || saved.path;
+      // Refresh `last`/`books` so a book opened in Pi is picked up here too.
+      piState = loadState(agentDir);
+      const input = raw.trim() || piState.last || "";
       if (!input) {
         toast("fish: 用法 /fish <文件路径>", "warning");
         return false;
@@ -72,18 +110,19 @@ export default Plugin.define({
         toast(`fish: 打不开 ${file} — ${String(error)}`, "error");
         return false;
       }
+
       book = loaded;
-      const para = Math.max(0, Math.min(resume?.para ?? 0, loaded.paragraphs.length - 1));
-      const chars = Math.max(0, resume?.chars ?? 0);
-      void updateSaved((draft) => {
-        draft.path = file;
+      const saved = resume ?? piState.books[file];
+      const para = Math.max(0, Math.min(saved?.para ?? 0, loaded.paragraphs.length - 1));
+      const chars = Math.max(0, saved?.chars ?? 0);
+      updateView((draft) => {
         draft.para = para;
         draft.chars = chars;
         draft.hidden = false;
-        draft.updatedAt = Date.now();
       });
-      toast(`fish: ${basename(file)}`, "success");
       mount();
+      persist();
+      toast(`fish: ${basename(file)}`, "success");
       return true;
     };
 
@@ -99,9 +138,9 @@ export default Plugin.define({
           toast("fish: 已经读到结尾了", "info");
           return;
         }
-        commit(next.pos);
+        setPos(next.pos);
       } else {
-        commit(backFrom(book, pos, null, BODY_WIDTH, 1, 1).pos);
+        setPos(backFrom(book, pos, null, BODY_WIDTH, 1, 1).pos);
       }
     };
 
@@ -111,29 +150,20 @@ export default Plugin.define({
         return;
       }
       const pos = currentPos();
-      const percent = pos ? (atBookEnd(book, pos, BODY_WIDTH, 1) ? 100 : percentAt(book, pos, BODY_WIDTH)) : 0;
-      void updateSaved((draft) => {
-        draft.updatedAt = Date.now();
-      });
-      toast(`fish: 已保存 ${percent}% · ${basename(book.path)}`, "success");
+      persist();
+      toast(`fish: 已保存 ${pos ? percentOf(pos) : 0}% · ${basename(book.path)}`, "success");
     };
 
     const close = (): void => {
+      if (book) persist();
       book = null;
       unmount();
-      void updateSaved((draft) => {
-        draft.path = "";
-        draft.para = 0;
-        draft.chars = 0;
-        draft.hidden = false;
-        draft.updatedAt = Date.now();
-      });
       toast("fish: 已合上", "info");
     };
 
     const toggle = (): void => {
       if (!book) return;
-      void updateSaved((draft) => {
+      updateView((draft) => {
         draft.hidden = !draft.hidden;
       });
     };
@@ -143,11 +173,11 @@ export default Plugin.define({
       unregisterSlot = context.ui.slot({
         append: "session.composer.top",
         render: () => {
-          if (!book || saved.hidden) return null;
+          if (!book || view.hidden) return null;
           const pos = currentPos();
           const line = pos ? pageAt(book, pos, BODY_WIDTH, 1).lines[0] : undefined;
           if (!pos || !line) return null;
-          const percent = atBookEnd(book, pos, BODY_WIDTH, 1) ? 100 : percentAt(book, pos, BODY_WIDTH);
+          const percent = percentOf(pos);
           const body = `${GUTTER}${line.text}`;
           const pad = Math.max(GAP, BODY_WIDTH + GUTTER.length - line.text.length - PROGRESS_SLOT);
           return <text fg={context.theme.text.muted}>{`${body}${" ".repeat(pad)}${`${percent}%`.padStart(PROGRESS_SLOT)}`}</text>;
@@ -160,8 +190,10 @@ export default Plugin.define({
       unregisterSlot = null;
     };
 
-    // Resume the last book on TUI start.
-    if (saved.path) open(saved.path, { para: saved.para, chars: saved.chars });
+    // Resume the last book on TUI start when Pi's resume setting allows it.
+    if (piState.config.resumeOnStart && piState.last && existsSync(piState.last)) {
+      open(piState.last);
+    }
 
     context.keymap.layer(() => ({
       mode: "global",
@@ -192,8 +224,7 @@ export default Plugin.define({
           title: "Fish: open a book",
           slash: { name: "fish", aliases: ["fish-open"], arguments: true },
           run: (input) => {
-            if (input?.trim()) open(input);
-            else if (saved.path) open(saved.path, { para: saved.para, chars: saved.chars });
+            open(input ?? "");
           },
         },
         {

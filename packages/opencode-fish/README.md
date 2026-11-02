@@ -9,8 +9,9 @@ OpenCode TUI 版的「单行摸鱼看书」。目前在 `feat/opencode-fish` 分
 - `alt+j` / `alt+k` 或 `/fish-next` / `/fish-prev` 一行一行翻；
 - `/fish-save` 手动保存；
 - `/fish-close` 合上；`alt+m` 显示/隐藏；
-- 进度存在 OpenCode 的 durable storage 里（跨 TUI 重启、跨 TUI 实例自动同步），不是写 `~/.pi`；
-- 启动时自动恢复上次的书。
+- 进度和 Pi 版**共用** `~/.pi/agent/fish/state.json`（或 `PI_CODING_AGENT_DIR` 指向的目录）：在 Pi 里读到 42%，切到 OpenCode `/fish` 打开同一本，就接在 42% 那一行；
+- 启动时按 Pi 的 `resumeOnStart` 设置自动恢复上次的书；
+- 写入走和 Pi 版同一套「锁 + 按书合并」，两边同时开不会互相回退不同书的进度；同一本书以最后保存为准。
 
 ## 安装
 
@@ -44,7 +45,9 @@ npm install
 
 - **没有鼠标翻页**：OpenCode TUI 插件 API 没有暴露鼠标事件，只能键盘/命令；
 - **还没有多行阅读模式**：现在只有常驻一行；
-- 引擎暂时通过相对路径复用 Pi 包的 `src/reader.ts` / `src/paging.ts`（纯 TypeScript，没有 Pi 依赖）。等交互验证完，会把引擎抽到 `packages/core`，两个插件共用；
+- 同一本书两边同时读时，以最后保存的为准（和 Pi 多开一样）；
+- 这个 spike 早期版本用 OpenCode 自带 storage 存过测试进度，那部分不会自动迁移；现在统一以 Pi 的 `fish/state.json` 为准；
+- 引擎暂时通过相对路径复用 Pi 包的 `src/reader.ts` / `src/paging.ts` / `src/state.ts`（纯 TypeScript，没有 Pi 依赖）。等交互验证完，会把引擎抽到 `packages/core`，两个插件共用；
 - 宽度固定 66 列，窄终端可能折行。
 
 ## 结构说明

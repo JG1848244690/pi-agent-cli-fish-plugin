@@ -187,6 +187,6 @@ rm -r ~/.pi/agent/fish
 
 ## OpenCode 版（实验）
 
-同一套阅读引擎的 OpenCode TUI 移植在 `packages/opencode-fish`（分支 `feat/opencode-fish`）。目前只有常驻一行 + 键盘翻页 + `/fish-save`，没有鼠标和多行阅读模式，详见该目录的 README。
+同一套阅读引擎的 OpenCode TUI 移植在 `packages/opencode-fish`（分支 `feat/opencode-fish`）。目前只有常驻一行 + 键盘翻页 + `/fish-save`，没有鼠标和多行阅读模式；进度和 Pi 版共用 `~/.pi/agent/fish/state.json`。详见该目录的 README。
 
 Pi 版仍然在仓库根目录，安装路径不变；等 OpenCode 版跑通后再把 Pi 包迁进 `packages/` 做完整 monorepo。
