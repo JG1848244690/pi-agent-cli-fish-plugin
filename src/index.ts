@@ -13,6 +13,7 @@
  *   /fish-add [file|folder]   add books to the library (prompts when omitted)
  *   /fish                     resume the last book and open the reader
  *   /fish-read                open the many-line reader
+ *   /fish-save                save the current position now
  *   /fish list                same shelf, as a sub-command
  *   /fish next|prev [n]       page forward/back
  *   /fish chapter|back-chapter
@@ -630,6 +631,19 @@ function statusText(): string {
   return `notes: ${percent}%${chapterText} · ${basename(session.book.path)}`;
 }
 
+/** `/fish-save`: write the current position now and say where it went. */
+function saveNow(ctx: ExtensionContext): void {
+  if (!session.book) {
+    notify(ctx, "fish: 没有打开的书，没东西可存", "warning");
+    return;
+  }
+  persist();
+  const percent = currentPercent();
+  const chapter = chapterAt(session.book, session.pos);
+  const chapterText = chapter ? ` · ch.${chapter.number}` : "";
+  notify(ctx, `fish: 已保存 ${percent}%${chapterText} · ${basename(session.book.path)}`);
+}
+
 function parseCount(value: string | undefined, fallback = 1): number {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -847,6 +861,10 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      case "save":
+        saveNow(ctx);
+        return;
+
       case "status":
         if (ctx.hasUI) ctx.ui.notify(statusText(), "info");
         return;
@@ -881,6 +899,13 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("fish-read", {
     description: "摸鱼：打开整页阅读模式",
     handler: readCommand,
+  });
+
+  pi.registerCommand("fish-save", {
+    description: "摸鱼：立即保存当前阅读进度",
+    handler: (_args: string, ctx: ExtensionCommandContext) => {
+      saveNow(ctx);
+    },
   });
 
   pi.registerCommand("fish-find", {

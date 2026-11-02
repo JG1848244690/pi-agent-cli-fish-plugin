@@ -112,6 +112,7 @@ pi
 /fish-add [file|folder]     加书；省略参数弹出路径输入框
 /fish                       继续上次的书并进入阅读模式
 /fish-read                  进入阅读模式（同 /fish）
+/fish-save                  立即保存当前阅读进度
 /fish-find [关键词|off]      搜索悬浮窗；off 去掉高亮
 /fish-list                  打开书架（选书 / 换书，点完接着搜它的内容）
 /fish next [n] / prev [n]   常驻行前进/后退 n 行

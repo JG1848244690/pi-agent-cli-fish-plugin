@@ -69,6 +69,7 @@
 | `/fish chapter` | 下一章开头 |
 | `/fish auto 8` | 每 8 秒自动下一行（`/fish auto off` 停） |
 | `/fish status` | 报当前进度、章节号、文件名 |
+| `/fish-save` | 立即保存当前进度（顺带显示存到哪了） |
 | `/fish hide` / `/fish show` | 老板键（hide 连阅读模式一起关掉） |
 
 ### 行尾那个百分比
@@ -160,11 +161,12 @@
 
 ## 6. 命令全表
 
-顶层是五个 `fish-*` 命令（都有中划线，`/fi` 一打就列全，好记也好翻）：
+顶层是六个 `fish-*` 命令（都有中划线，`/fi` 一打就列全，好记也好翻）：
 
 ```
 /fish                       继续上次的书并进入阅读模式
 /fish-read                  进入阅读模式（同 /fish）
+/fish-save                  立即保存当前阅读进度
 /fish-list                  打开书架：选书 / 换书，点一本就搜它的内容
 /fish-find [关键词|off]      搜索悬浮窗；off 去掉高亮
 /fish-add [file|folder]     加书；省略参数弹出路径输入框
@@ -181,6 +183,7 @@
 /fish reader-lines 12      阅读模式行数
 /fish resume off           关掉「启动自动恢复上次阅读」
 /fish status               当前进度、章节、文件名
+/fish save                 同 /fish-save
 /fish close                合上书并移除常驻行
 /fish find / search / 搜索 / 查找   同 /fish-find
 ```
