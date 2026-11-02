@@ -685,13 +685,21 @@ export default function (pi: ExtensionAPI) {
     persist();
   });
 
+  const toggleWidget = (ctx: ExtensionContext): void => {
+    if (!session.book) return;
+    if (session.hidden) showWidget(ctx);
+    else boss(ctx);
+  };
+
   pi.registerShortcut("alt+m", {
     description: "Toggle notes widget",
-    handler: (ctx) => {
-      if (!session.book) return;
-      if (session.hidden) showWidget(ctx);
-      else boss(ctx);
-    },
+    handler: toggleWidget,
+  });
+
+  // alt+h is the "hide" muscle memory some people have; same toggle as alt+m.
+  pi.registerShortcut("alt+h", {
+    description: "Show/hide notes widget",
+    handler: toggleWidget,
   });
 
   // alt+letter, *not* ctrl+shift+letter: terminals without the Kitty keyboard

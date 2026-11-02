@@ -161,11 +161,26 @@ export default Plugin.define({
       toast("fish: 已合上", "info");
     };
 
-    const toggle = (): void => {
+    const hide = (): void => {
       if (!book) return;
       updateView((draft) => {
-        draft.hidden = !draft.hidden;
+        draft.hidden = true;
       });
+      unmount();
+    };
+
+    const show = (): void => {
+      if (!book) return;
+      updateView((draft) => {
+        draft.hidden = false;
+      });
+      mount();
+    };
+
+    const toggle = (): void => {
+      if (!book) return;
+      if (view.hidden) show();
+      else hide();
     };
 
     const mount = (): void => {
@@ -217,7 +232,26 @@ export default Plugin.define({
           id: "fish.toggle",
           title: "Fish: show/hide",
           bind: "alt+m",
+          slash: { name: "fish-toggle" },
           run: () => toggle(),
+        },
+        {
+          id: "fish.toggle.h",
+          title: "Fish: show/hide",
+          bind: "alt+h",
+          run: () => toggle(),
+        },
+        {
+          id: "fish.hide",
+          title: "Fish: hide the line",
+          slash: { name: "fish-hide" },
+          run: () => hide(),
+        },
+        {
+          id: "fish.show",
+          title: "Fish: show the line",
+          slash: { name: "fish-show" },
+          run: () => show(),
         },
         {
           id: "fish.open",
@@ -240,7 +274,7 @@ export default Plugin.define({
           run: () => close(),
         },
       ],
-      bindings: ["fish.next", "fish.prev", "fish.toggle"],
+      bindings: ["fish.next", "fish.prev", "fish.toggle", "fish.toggle.h"],
     }));
 
     return () => unmount();
