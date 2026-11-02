@@ -65,3 +65,74 @@ test("round-trips progress and config", () => {
   assert.equal(store.books["/b/a.epub"]?.percent, 12);
   assert.match(readFileSync(statePath(agentDir), "utf8"), /a\.epub/);
 });
+
+test("a stale instance does not roll back another book's newer progress", () => {
+  const agentDir = tempAgent();
+  const config = { readerLines: 15, placement: "aboveEditor" as const, resumeOnStart: true };
+
+  // Both books at para 1. Then another instance reads b far ahead.
+  saveState(agentDir, {
+    last: "/b/a.txt",
+    library: ["/b/a.txt", "/b/b.txt"],
+    books: { "/b/a.txt": { para: 1, updatedAt: 100 }, "/b/b.txt": { para: 1, updatedAt: 100 } },
+    config,
+  });
+  saveState(agentDir, {
+    last: "/b/b.txt",
+    library: ["/b/a.txt", "/b/b.txt"],
+    books: { "/b/a.txt": { para: 1, updatedAt: 100 }, "/b/b.txt": { para: 9, updatedAt: 200 } },
+    config,
+  });
+
+  // The first instance now saves its own (stale view of b, newer a).
+  saveState(agentDir, {
+    last: "/b/a.txt",
+    library: ["/b/a.txt", "/b/b.txt"],
+    books: { "/b/a.txt": { para: 2, updatedAt: 150 }, "/b/b.txt": { para: 1, updatedAt: 100 } },
+    config,
+  });
+
+  const store = loadState(agentDir);
+  assert.equal(store.books["/b/a.txt"]?.para, 2, "our own book keeps our progress");
+  assert.equal(store.books["/b/b.txt"]?.para, 9, "the other book keeps its newer progress");
+});
+
+test("library additions from two instances are unioned", () => {
+  const agentDir = tempAgent();
+  const config = { readerLines: 15, placement: "aboveEditor" as const, resumeOnStart: true };
+  saveState(agentDir, { library: ["/b/a.txt"], books: {}, config });
+  saveState(agentDir, { library: ["/b/c.txt"], books: {}, config });
+  assert.deepEqual(loadState(agentDir).library, ["/b/a.txt", "/b/c.txt"]);
+});
+
+test("an untouched config field does not revert another instance's change", () => {
+  const agentDir = tempAgent();
+  const mine = loadState(agentDir);
+  mkdirSync(join(agentDir, "fish"), { recursive: true });
+
+  // Another process writes a new reader height directly.
+  writeFileSync(
+    statePath(agentDir),
+    JSON.stringify({ ...mine, config: { ...mine.config, readerLines: 25 } }, null, 2),
+  );
+
+  // This instance never touched readerLines, so saving must keep 25.
+  saveState(agentDir, mine);
+  assert.equal(loadState(agentDir).config.readerLines, 25);
+
+  // Once it changes the value itself, its value wins.
+  mine.config.readerLines = 30;
+  saveState(agentDir, mine);
+  assert.equal(loadState(agentDir).config.readerLines, 30);
+});
+
+test("a save clears its lock and leaves no temp file", () => {
+  const agentDir = tempAgent();
+  saveState(agentDir, {
+    library: [],
+    books: {},
+    config: { readerLines: 15, placement: "aboveEditor", resumeOnStart: true },
+  });
+  assert.equal(existsSync(`${statePath(agentDir)}.lock`), false);
+  assert.equal(existsSync(`${statePath(agentDir)}.${process.pid}.tmp`), false);
+});

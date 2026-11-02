@@ -3,7 +3,18 @@
  * novel path never shows up in session history or transcripts.
  */
 
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 export interface BookState {
@@ -75,6 +86,21 @@ export function statePath(agentDir: string): string {
 }
 
 export function loadState(agentDir: string): FishState {
+  const state = readState(agentDir);
+  configBaseline.set(agentDir, { ...state.config });
+  return state;
+}
+
+/**
+ * Config keys that `saveState` three-way merges. A value this process did not
+ * change never overwrites one another running Pi changed.
+ */
+const CONFIG_KEYS = ["readerLines", "placement", "resumeOnStart", "manualSeeded"] as const;
+
+/** What this process last read (or wrote) for a config, per agent dir. */
+const configBaseline = new Map<string, FishConfig>();
+
+function readState(agentDir: string): FishState {
   migrateLegacyDir(agentDir);
   const file = statePath(agentDir);
   try {
@@ -129,13 +155,101 @@ export function loadState(agentDir: string): FishState {
   }
 }
 
+// ------------------------------------------------------------ multi-instance --
+
+/** A writer holds the lock for one read-merge-write; this is only a safety net. */
+const LOCK_TIMEOUT_MS = 250;
+const LOCK_RETRY_MS = 5;
+/** A lock older than this is from a process that crashed mid-save. */
+const LOCK_STALE_MS = 10_000;
+
+function sleepSync(ms: number): void {
+  // Saves are rare and short; the TUI can afford a few milliseconds of spin.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Exclusive-create lock; returns the release function, or null on timeout. */
+function acquireLock(file: string): (() => void) | null {
+  const lock = `${file}.lock`;
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      const fd = openSync(lock, "wx");
+      try {
+        writeFileSync(fd, String(process.pid), "utf8");
+      } finally {
+        closeSync(fd);
+      }
+      return () => {
+        try {
+          unlinkSync(lock);
+        } catch {
+          // another process already cleared it
+        }
+      };
+    } catch {
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) {
+          unlinkSync(lock);
+          continue;
+        }
+      } catch {
+        // the lock disappeared between open and stat: try again
+      }
+      if (Date.now() >= deadline) return null;
+      sleepSync(LOCK_RETRY_MS);
+    }
+  }
+}
+
+/**
+ * Merge what another Pi instance wrote while this one was running.
+ *
+ * Progress is per book: the newer `updatedAt` wins, so different instances
+ * reading different books never roll each other back. The library is a union.
+ * Config is a three-way merge: only fields this process actually changed are
+ * allowed to replace what is on disk.
+ */
+function mergeStates(agentDir: string, disk: FishState, incoming: FishState): FishState {
+  const books: Record<string, BookState> = { ...disk.books };
+  for (const [path, book] of Object.entries(incoming.books)) {
+    const current = books[path];
+    if (!current || book.updatedAt >= current.updatedAt) books[path] = book;
+  }
+
+  const library = [...disk.library];
+  for (const path of incoming.library) {
+    if (!library.includes(path)) library.push(path);
+  }
+
+  const base = configBaseline.get(agentDir);
+  const config: FishConfig = { ...disk.config };
+  if (base) {
+    for (const key of CONFIG_KEYS) {
+      if (incoming.config[key] !== base[key]) Object.assign(config, { [key]: incoming.config[key] });
+    }
+  } else {
+    Object.assign(config, incoming.config);
+  }
+
+  return { last: incoming.last ?? disk.last, library, books, config };
+}
+
 export function saveState(agentDir: string, state: FishState): void {
   const file = statePath(agentDir);
   try {
     mkdirSync(dirname(file), { recursive: true });
-    const tmp = `${file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(state, null, 2), "utf8");
-    renameSync(tmp, file);
+    const release = acquireLock(file);
+    try {
+      const merged = mergeStates(agentDir, readState(agentDir), state);
+      const tmp = `${file}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify(merged, null, 2), "utf8");
+      // rename replaces atomically: a reader never sees a half-written file.
+      renameSync(tmp, file);
+      configBaseline.set(agentDir, { ...state.config });
+    } finally {
+      release?.();
+    }
   } catch {
     // Reading novels is not worth crashing an agent session over.
   }
